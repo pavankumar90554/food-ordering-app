@@ -1,0 +1,68 @@
+pipeline {
+    agent any
+    tools {
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+    environment {
+        DOCKER_IMAGE = 'pavankumar213/food-ordering-app'
+    }
+
+    stages {
+        stage('git checkout') {
+            steps {
+                git changelog: false, poll: false, url: 'https://github.com/pavankumar90554/food-ordering-app.git'
+            }
+        }
+         stage('mvn') {
+            steps {
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+        stage('Docker Build') {
+            steps {
+                sh 'docker build -t $DOCKER_IMAGE:latest .'
+            }
+        }
+        stage('Trivy Image Scan') {
+    steps {
+        sh '''
+        trivy image --severity HIGH,CRITICAL \
+        --no-progress \
+        pavankumar213/food-ordering-app:latest
+        '''
+        }
+      }
+       stage('Docker Login') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                }
+            }
+        }
+        stage('Docker Push') {
+            steps {
+                sh 'docker push $DOCKER_IMAGE:latest'
+            }
+        }
+        stage('Docker Deploy') {
+    steps {
+        sh '''
+        echo "Stopping old container if exists..."
+        docker stop food-app || true
+        docker rm food-app || true
+
+        echo "Running new container..."
+        docker run -d \
+          --name food-app \
+          -p 8081:8080 \
+          pavankumar213/food-ordering-app:latest
+        '''
+         }
+       }
+    }
+}
